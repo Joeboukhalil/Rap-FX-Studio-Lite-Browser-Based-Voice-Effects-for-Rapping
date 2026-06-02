@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rap FX Studio Lite</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{
+    margin:0;
+    font-family:Arial;
+    background:#111;
+    color:white;
+}
+
+.container{
+    max-width:900px;
+    margin:auto;
+    padding:20px;
+}
+
+.card{
+    background:#1e1e1e;
+    padding:15px;
+    border-radius:12px;
+    margin-bottom:15px;
+}
+
+h1{text-align:center;}
+
+label{display:block;margin-top:10px;}
+
+input[type=range]{width:100%;}
+
+button{
+    padding:12px;
+    margin:5px;
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+}
+
+.primary{background:#00c853;color:white;}
+.secondary{background:#2979ff;color:white;}
+.danger{background:#d50000;color:white;}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>🎤 Rap FX Studio Lite</h1>
+
+<div class="card">
+<input type="file" id="file" accept="audio/*">
+<audio id="player" controls style="width:100%;margin-top:10px;"></audio>
+</div>
+
+<div class="card">
+
+<label>Rhythm Echo</label>
+<input type="range" id="echo" min="0" max="100" value="40">
+
+<label>Bass Punch Voice</label>
+<input type="range" id="bass" min="0" max="100" value="50">
+
+<label>Street Radio</label>
+<input type="range" id="radio" min="0" max="100" value="0">
+
+<label>Double Flow Echo</label>
+<input type="range" id="double" min="0" max="100" value="0">
+
+<label>Tunnel Voice</label>
+<input type="range" id="tunnel" min="0" max="100" value="0">
+
+<label>Robot Rap Blend</label>
+<input type="range" id="robot" min="0" max="100" value="0">
+
+<label>Reverse Shadow</label>
+<input type="range" id="reverse" min="0" max="100" value="0">
+
+<br><br>
+
+<button class="primary" onclick="playFX()">Preview FX</button>
+<button class="secondary" onclick="downloadFX()">Download FX Audio</button>
+<button class="danger" onclick="resetFX()">Reset</button>
+
+</div>
+
+ <h3>Convert your WebM recording to MP3 (Free & Browser-based)</h3>
+<ul>
+  <li><a href="https://online-audio-converter.com/" target="_blank">Online Audio Converter</a></li>
+  <li><a href="https://cloudconvert.com/webm-to-mp3" target="_blank">CloudConvert WebM to MP3</a></li>
+  <li><a href="https://convertio.co/webm-mp3/" target="_blank">Convertio WebM to MP3</a></li>
+  <li><a href="https://audio.online-convert.com/convert-to-mp3" target="_blank">Audio Converter Online</a></li>
+</ul>
+
+</div>
+
+<script>
+
+let audioURL;
+
+document.getElementById("file").addEventListener("change",(e)=>{
+    audioURL = URL.createObjectURL(e.target.files[0]);
+    document.getElementById("player").src = audioURL;
+});
+
+function createCtx(){
+    return new (window.AudioContext || window.webkitAudioContext)();
+}
+
+function buildGraph(ctx, source){
+
+    const gain = ctx.createGain();
+
+    const bass = ctx.createBiquadFilter();
+    bass.type = "lowshelf";
+    bass.frequency.value = 150;
+    bass.gain.value = document.getElementById("bass").value * 0.4;
+
+    const radio = ctx.createBiquadFilter();
+    radio.type = "bandpass";
+    radio.frequency.value = 1200;
+    radio.Q.value = 1 + document.getElementById("radio").value / 20;
+
+    const delay = ctx.createDelay();
+    delay.delayTime.value = document.getElementById("tunnel").value / 100;
+
+    const feedback = ctx.createGain();
+    feedback.gain.value = document.getElementById("tunnel").value / 120;
+
+    delay.connect(feedback);
+    feedback.connect(delay);
+
+    const echo = ctx.createDelay();
+    echo.delayTime.value = 0.25;
+
+    const echoGain = ctx.createGain();
+    echoGain.gain.value = document.getElementById("double").value / 100;
+
+    echo.connect(echoGain);
+    echoGain.connect(ctx.destination);
+
+    const wave = ctx.createWaveShaper();
+    function distort(x){ return Math.tanh(x * 3); }
+
+    wave.curve = new Float32Array([...Array(44100)].map((_,i)=>{
+        let x = i/22050 - 1;
+        return distort(x);
+    }));
+
+    wave.oversample = "4x";
+
+    source.connect(bass);
+    bass.connect(radio);
+    radio.connect(delay);
+    delay.connect(wave);
+    wave.connect(gain);
+
+    source.connect(echo);
+
+    gain.connect(ctx.destination);
+
+    return gain;
+}
+
+// PLAY
+function playFX(){
+
+    if(!audioURL){
+        alert("Upload audio first");
+        return;
+    }
+
+    const ctx = createCtx();
+    const audio = new Audio(audioURL);
+    const src = ctx.createMediaElementSource(audio);
+
+    buildGraph(ctx, src);
+
+    audio.play();
+}
+
+// DOWNLOAD (REAL RENDER)
+async function downloadFX(){
+
+    if(!audioURL){
+        alert("Upload audio first");
+        return;
+    }
+
+    const arrayBuffer = await fetch(audioURL).then(r=>r.arrayBuffer());
+
+    const tempCtx = new OfflineAudioContext(2, 44100 * 40, 44100);
+
+    const audioBuffer = await tempCtx.decodeAudioData(arrayBuffer);
+
+    const source = tempCtx.createBufferSource();
+    source.buffer = audioBuffer;
+
+    const gain = buildGraph(tempCtx, source);
+
+    source.start(0);
+
+    const renderedBuffer = await tempCtx.startRendering();
+
+    const wav = bufferToWav(renderedBuffer);
+
+    const blob = new Blob([wav], {type:"audio/wav"});
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "rap_fx_output.wav";
+    a.click();
+}
+
+// WAV EXPORT
+function bufferToWav(buffer){
+    let numOfChan = buffer.numberOfChannels,
+    length = buffer.length * numOfChan * 2 + 44,
+    bufferArray = new ArrayBuffer(length),
+    view = new DataView(bufferArray),
+    channels = [],
+    i, sample,
+    offset = 0,
+    pos = 0;
+
+    const setUint16 = (data) => {
+        view.setUint16(pos, data, true);
+        pos += 2;
+    };
+
+    const setUint32 = (data) => {
+        view.setUint32(pos, data, true);
+        pos += 4;
+    };
+
+    setUint32(0x46464952);
+    setUint32(length - 8);
+    setUint32(0x45564157);
+
+    setUint32(0x20746d66);
+    setUint32(16);
+    setUint16(1);
+    setUint16(numOfChan);
+    setUint32(buffer.sampleRate);
+    setUint32(buffer.sampleRate * 2 * numOfChan);
+    setUint16(numOfChan * 2);
+    setUint16(16);
+
+    setUint32(0x61746164);
+    setUint32(length - pos - 4);
+
+    for(i=0;i<buffer.numberOfChannels;i++)
+        channels.push(buffer.getChannelData(i));
+
+    while(pos < length){
+        for(i=0;i<numOfChan;i++){
+            sample = Math.max(-1, Math.min(1, channels[i][offset]));
+            sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+            view.setInt16(pos, sample, true);
+            pos += 2;
+        }
+        offset++;
+    }
+
+    return bufferArray;
+}
+
+// RESET
+function resetFX(){
+    document.querySelectorAll("input[type=range]").forEach(s=>{
+        s.value = 0;
+    });
+}
+
+</script>
+
+</body>
+</html>
